@@ -1,7 +1,12 @@
 type ide = string
 
-(* environment -> identifier - value - taitness - secret - handle *) 
-type 'v env = (string * 'v * bool * bool * bool) list
+type sec_level=
+  | Secret 
+  | Handler 
+
+(* environment -> identifier - value - taitness*) 
+type 'v env = (ide * 'v  * bool) list
+type 'v priv_TB = (ide * sec_level) list
 
 type exp =
 | Eint of int
@@ -9,18 +14,18 @@ type exp =
 | Estring of string
 | Var of ide
 | Prim of ide * exp * exp
-| Let of ide * exp * exp
 | If of exp * exp * exp
+| Let of ide * exp * exp
 | Fun of ide * exp
-| Call of exp * exp
+(*| | Call of exp * exp
 | Abort of string
-| Trustblock of tcb 
+| Trustblock of tc 
 | Include of exp
-| Excecute of exp
+| Excecute of exp*)
 
-and tcb = 
-| LetSecret of ide * exp * tcb
-| Handle of ide * tcb
+and tc = 
+| LetSecret of ide * exp * tc
+| Handle of ide * tc
 | EndRecursion 
 
 
@@ -28,24 +33,25 @@ type evt =
   | Int of int
   | Bool of bool
   | String of string
-  | Closure of ide * exp * evt env 
+  | Closure of ide * exp * evt env * evt priv_TB
 
 
 
 let rec lookup env x =
 match env with
 | [] -> failwith (x ^ "not found")
-| (y, v, _, _, _) :: r -> if x = y then v else lookup r x
+| (y, v, _) :: r -> if x = y then v else lookup r x
 
 (* taintness of a variable *) 
 let rec t_lookup env x =
 match env with
 | [] -> failwith (x ^ "not found")
-| (y, _, t, _, _) :: r -> if x = y then t else t_lookup r x
+| (y, _, t) :: r -> if x = y then t else t_lookup r x
 
-let bind env (x:ide) (v:int) (t:bool) (s:bool) (h:bool)= (x,v,t,s,h)::env
+let bind_env env (x:ide) (v:evt) (t:bool) = (x,v,t)::env
+let bind_tb priv_TB (x:ide) (sl:sec_level) = (x,sl)::priv_TB
 
-let rec eval (e : exp) (env:evt env) (t : bool) (s : bool) (h : bool) : evt * bool =
+let rec eval (e : exp) (env:evt env) (t : bool) (priv_TB: evt priv_TB) : evt * bool =
 match e with
 | Eint n -> (Int n, t)
 | Ebool b -> (Bool b, t)
@@ -53,8 +59,8 @@ match e with
 | Var x -> (lookup env x, t_lookup env x)
 | Prim (op, e1, e2) ->
   begin
-    let v1, t1 = eval e1 env t s h in 
-    let v2, t2 = eval e2 env t s h in
+    let v1, t1 = eval e1 env t priv_TB in
+    let v2, t2 = eval e2 env t priv_TB in
     match (op, v1, v2) with
     (* taintness of binary ops is given by the OR of the taintness of the args *) 
     | "*", Int i1, Int i2 -> (Int (i1 * i2), t1 || t2)
@@ -67,21 +73,38 @@ match e with
   end
 | If (e1, e2, e3) -> 
   begin
-  let v1, t1 = eval e1 env t s h in 
+  let v1, t1 = eval e1 env t priv_TB in 
   match v1 with
-    | Bool true -> let v2, t2 = eval e2 env t s h in (v2, t1 || t2) 
-    | Bool false -> let v3, t3 = eval e3 env t s h in (v3, t1 || t3) 
+    | Bool true -> let v2, t2 = eval e2 env t priv_TB in (v2, t1 || t2) 
+    | Bool false -> let v3, t3 = eval e3 env t priv_TB in (v3, t1 || t3) 
     | _ -> failwith "Unexpected condition."
   end
-| Let(i, e, ebody) ->
-  let tipo , risultato = (eval e env t s h) in 
-    eval ebody (bind env i risultato s h) t s h
+| Let (x, exprRight, letBody) ->
+      let xVal, taintness = eval exprRight env t priv_TB in
+      let letEnv = bind_env env x xVal taintness in
+      eval letBody letEnv t priv_TB
+| Fun (f_param, fBody) ->
+  (Closure (f_param, fBody, env, priv_TB), t)
 
 
 
+(*----------------------------------------------------------------------------------------------------*)
+(*TEST*)
+(*----------------------------------------------------------------------------------------------------*)
+
+let x = Let("a",Eint 5,  Let("b", Eint 5,Prim ("*", Var "b", Var "a")));;
+
+let env = [] 
+let priv_TB = [] 
+let prova = eval (x) env false priv_TB 
 
 
-
-
-
-
+let print_eval (ris : evt * bool) =
+  (*Just to display on the terminal the evaluation result*)
+  match ris with
+  | Int u, t -> Printf.printf " Result: Int %d, Taintness: %b\n" u t
+  | Bool u, t -> Printf.printf " Result: Bool %b, Taintness: %b \n" u t
+  | String u, t -> Printf.printf " Result: String %s, Taintness: %b\n" u t
+  | _ -> Printf.printf " Closure\n";;
+  
+  print_eval(prova);;
