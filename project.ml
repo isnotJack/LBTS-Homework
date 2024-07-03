@@ -22,10 +22,14 @@ type exp =
 | Abort of string
 | Trustblock of exp 
 | LetSecret of ide * exp * exp
-| Handle of ide * exp
-(*| Include of exp
-| Excecute of exp
-| EndRecursion *)
+| LetHandle of ide * exp
+| LetPublic of ide * exp * exp
+| Include of exp
+| Execute of exp
+| CallHandler of exp * exp
+| End
+
+ 
 
 
 
@@ -34,7 +38,10 @@ type evt =
 | Bool of bool
 | String of string
 | Closure of ide * exp * evt env * evt priv_TB
-| Secure_Block of evt priv_TB  
+| ClosureInclude of exp * evt env
+| Secure_Block of evt priv_TB * evt env
+
+
 
 
 
@@ -51,13 +58,23 @@ match env with
 
 let rec secret_lookup priv_TB x = 
 match priv_TB with
-| [] -> failwith (x ^ "not found")
+| [] -> false
 | (y, s) :: r -> if x = y && s = Secret then true else secret_lookup r x
 
 let rec pub_lookup priv_TB x = 
   match priv_TB with
-  | [] -> failwith (x ^ "not found")
+  | [] -> false
   | (y, s) :: r -> if x = y && s = Public then true else pub_lookup r x
+
+let rec handle_lookup priv_TB x = 
+  match priv_TB, x with
+  | [], _ -> false
+  | _, Var y -> (
+      match priv_TB with
+      | [] -> false
+      | (z, s) :: r -> if y = z && s = Handler then true else handle_lookup r x)
+  | _, _ -> false
+  
 
 let bind_env env (x:ide) (v:evt) (t:bool) = (x,v,t)::env
 let bind_tb priv_TB (x:ide) (sl:sec_level) = (x,sl)::priv_TB
@@ -93,6 +110,8 @@ match e with
     | _ -> failwith "Unexpected condition."
   end
 | Let (x, exprRight, letBody) ->
+    if inTrustBlock then failwith "You can't declare a variable in a TrustBlock" 
+    else
       let xVal, taintness = eval exprRight env t priv_TB inTrustBlock in
       let letEnv = bind_env env x xVal taintness in
       eval letBody letEnv t priv_TB inTrustBlock
@@ -112,8 +131,7 @@ match e with
 | Trustblock tc ->
     if t then failwith "Tainted sources cannot access trust block"
     else
-      let _ , t = eval tc env t priv_TB true in
-      (Secure_Block(priv_TB),t)
+      eval tc env t priv_TB true
 | LetSecret (id, exprRight, letBody) ->
     if not (inTrustBlock) then failwith "You have to be in a TrustBlock" 
     else
@@ -121,15 +139,45 @@ match e with
     let letEnv = bind_env env id xVal taintness in
     let priv_TB2 = bind_tb priv_TB id Secret in
     eval letBody letEnv t priv_TB2 inTrustBlock 
-| Handle (id, next) ->
+| LetHandle (id, next) ->
+  if not (inTrustBlock) then failwith "You have to be in a TrustBlock" 
+  else
   if secret_lookup priv_TB id then failwith "can't declare handle a secret"
   else if pub_lookup priv_TB id then
     let priv_TB2 = bind_tb priv_TB id Handler in
     eval next env t priv_TB2 inTrustBlock
   else failwith "can't add to handle list a variable not trusted" 
+| LetPublic (id, exprRight, letBody) ->
+    if not (inTrustBlock) then failwith "You have to be in a TrustBlock" 
+    else
+    let xVal, taintness = eval exprRight env t priv_TB inTrustBlock in
+    let letEnv = bind_env env id xVal taintness in
+    let priv_TB2 = bind_tb priv_TB id Public in
+    eval letBody letEnv t priv_TB2 inTrustBlock   
+| Include iBody -> (
+  if inTrustBlock then failwith "You can't include a file in a TrustBlock" 
+  else
+  match iBody with
+  | Include _ -> failwith "Cannot nest include blocks"
+  | Trustblock _ ->
+      failwith "Cannot create TrustBlocks inside an Include"
+  | _ -> (ClosureInclude (iBody, env), t))
+| Execute e -> 
+  begin
+    let v1, t1 = eval e env t priv_TB inTrustBlock in
+    match v1 with
+    | ClosureInclude (iBody, iEnv) -> eval iBody iEnv true priv_TB inTrustBlock
+    | _ -> failwith "Unexpected condition."
+  end
+| CallHandler (e1, e2) -> (
+    let v1, t1 = eval e1 env t priv_TB inTrustBlock in
+    if handle_lookup priv_TB e2 then failwith "Can't access a handle"
+    else
+      match (v1, t1) with
+      | Secure_Block(priv_TB, secondEnv), t1 -> eval e2 secondEnv t1 priv_TB inTrustBlock
+      | _ -> failwith "the access must be applied to an trustblock")
+| End -> (Secure_Block(priv_TB,env),t)
 
-
-(*| EndRecursion -> (Secure_Block(priv_TB),t)*)
 
 
 
@@ -155,7 +203,7 @@ let print_eval (ris : evt * bool) =
   
   print_eval(prova);;
 
-(*TEST 2*)
+(*TEST 2
 let x = Trustblock(Let("a",Eint 5,  Let("b", Eint 5,Prim ("*", Var "b", Var "a"))));;
 
 let env = [] 
@@ -169,8 +217,73 @@ let print_eval (ris : evt * bool) =
   | Int u, t -> Printf.printf " Result: Int %d, Taintness: %b\n" u t
   | Bool u, t -> Printf.printf " Result: Bool %b, Taintness: %b \n" u t
   | String u, t -> Printf.printf " Result: String %s, Taintness: %b\n" u t
-  | Secure_Block u,t ->  Printf.printf " Result: Block created succesfully\n"
+  | Secure_Block (u,b),t ->  Printf.printf " Result: Block created succesfully\n"
   | _ -> Printf.printf " Closure\n";;
 
   
   print_eval(prova);;
+*)
+(*TEST 3*)
+let x = Let("mytrustB",Trustblock(LetPublic("x",Eint 11,LetHandle("x",End))),
+        Let("a",Eint 5,  Let("b", Eint 5,Prim ("*", Var "b", Var "a"))));;
+
+let env = [] 
+let priv_TB = [] 
+let prova = eval (x) env false priv_TB false
+
+
+let print_eval (ris : evt * bool) =
+  (*Just to display on the terminal the evaluation result*)
+  match ris with
+  | Int u, t -> Printf.printf " Result: Int %d, Taintness: %b\n" u t
+  | Bool u, t -> Printf.printf " Result: Bool %b, Taintness: %b \n" u t
+  | String u, t -> Printf.printf " Result: String %s, Taintness: %b\n" u t
+  | Secure_Block (u,b),t ->  Printf.printf " Result: Block created succesfully\n"
+  | _ -> Printf.printf " Closure\n";;
+
+  
+  print_eval(prova);;
+  
+  (*TEST 4 -> prova di access trust*)
+  let x = Let("mytrustB",Trustblock(LetPublic("x",Eint 11,LetPublic("f",Var "x",LetHandle("f", End)))),
+  CallHandler(Var "mytrustB", Var "f")
+);;
+  
+  let env = [] 
+  let priv_TB = [] 
+  let prova = eval (x) env false priv_TB false
+  
+  
+  let print_eval (ris : evt * bool) =
+    (*Just to display on the terminal the evaluation result*)
+    match ris with
+    | Int u, t -> Printf.printf " Result: Int %d, Taintness: %b\n" u t
+    | Bool u, t -> Printf.printf " Result: Bool %b, Taintness: %b \n" u t
+    | String u, t -> Printf.printf " Result: String %s, Taintness: %b\n" u t
+    | Secure_Block (u,b),t ->  Printf.printf " Result: Block created succesfully\n"
+    | _ -> Printf.printf " Closure\n";;
+  
+    
+    print_eval(prova);;
+
+ 
+  (*TEST 5 -> prova di include*)
+  let x = Let("extCode",Include(Let("a",Eint 5,Let("b",Eint 2,Prim ("*", Var "b", Var "a")))),
+      Execute(Var "extCode"));;
+  
+  let env = [] 
+  let priv_TB = [] 
+  let prova = eval (x) env false priv_TB false
+  
+  
+  let print_eval (ris : evt * bool) =
+    (*Just to display on the terminal the evaluation result*)
+    match ris with
+    | Int u, t -> Printf.printf " Result: Int %d, Taintness: %b\n" u t
+    | Bool u, t -> Printf.printf " Result: Bool %b, Taintness: %b \n" u t
+    | String u, t -> Printf.printf " Result: String %s, Taintness: %b\n" u t
+    | Secure_Block (u,b),t ->  Printf.printf " Result: Block created succesfully\n"
+    | _ -> Printf.printf " Closure\n";;
+  
+    
+    print_eval(prova);;   
