@@ -1,3 +1,6 @@
+(*----------------------------------------------------------------------------------------------------*)
+(*TYPE DEFINITION AND ENVIRONMENT*)
+(*----------------------------------------------------------------------------------------------------*)
 type ide = string
 
 type sec_level=
@@ -5,8 +8,14 @@ type sec_level=
   | Public 
   | Handler 
 
-(* environment -> identifier - value - taitness*) 
+type conf_level = 
+  | High 
+  | Low
+
+(* 'env' is a list of: identifier ('ide') - value ('v') - taintness ('bool')*) 
 type 'v env = (ide * 'v  * bool) list
+
+(*'priv_TB' is a list of: identifier ('ide') - security level ('sec_level')*)
 type 'v priv_TB = (ide * sec_level) list
 
 type exp =
@@ -17,9 +26,9 @@ type exp =
 | Prim of ide * exp * exp
 | If of exp * exp * exp
 | Let of ide * exp * exp
+| LetIn of ide * exp * exp (* to test the taint analysis *)
 | Fun of ide * exp
 | Apply of exp * exp
-| Abort of string
 | Trustblock of exp 
 | LetSecret of ide * exp * exp
 | LetHandle of ide * exp
@@ -29,10 +38,6 @@ type exp =
 | CallHandler of exp * exp
 | End
 
- 
-
-
-
 type evt =
 | Int of int
 | Bool of bool
@@ -41,16 +46,15 @@ type evt =
 | ClosureInclude of exp * evt env
 | Secure_Block of evt priv_TB * evt env
 
-
-
-
+(*----------------------------------------------------------------------------------------------------*)
+(*UTILITIES*)
+(*----------------------------------------------------------------------------------------------------*)
 
 let rec lookup env x =
 match env with
 | [] -> failwith (x ^ "not found")
 | (y, v, _) :: r -> if x = y then v else lookup r x
 
-(* taintness of a variable *) 
 let rec t_lookup env x =
 match env with
 | [] -> failwith (x ^ "not found")
@@ -74,19 +78,33 @@ let rec handle_lookup priv_TB x =
       | [] -> false
       | (z, s) :: r -> if y = z && s = Handler then true else handle_lookup r x)
   | _, _ -> false
-  
+
+let lattice_checking a b = match a,b with
+  | Low, _ -> true
+  | _, High -> true
+  | _, _ -> false;;  
+
+let join e e' = if e = Low then e' else High ;;
 
 let bind_env env (x:ide) (v:evt) (t:bool) = (x,v,t)::env
 let bind_tb priv_TB (x:ide) (sl:sec_level) = (x,sl)::priv_TB
 
-
+(*----------------------------------------------------------------------------------------------------*)
+(*INTERPRETER*)
+(*----------------------------------------------------------------------------------------------------*)
 
 let rec eval (e : exp) (env:evt env) (t : bool) (priv_TB: evt priv_TB) (inTrustBlock: bool): evt * bool =
 match e with
 | Eint n -> (Int n, t)
 | Ebool b -> (Bool b, t)
 | Estring s -> (String s, t)
-| Var x -> (lookup env x, t_lookup env x)
+| Var x -> 
+  if inTrustBlock  && (secret_lookup priv_TB x) || (pub_lookup priv_TB x) then 
+    (lookup env x, t_lookup env x)
+  else
+    if secret_lookup priv_TB x then failwith "Can't access a secret"
+    else if handle_lookup priv_TB (Var x) || not (pub_lookup priv_TB x) then (lookup env x, t_lookup env x)
+    else failwith "Can't access a variable not trusted"
 | Prim (op, e1, e2) ->
   begin
     let v1, t1 = eval e1 env t priv_TB inTrustBlock in
@@ -115,21 +133,24 @@ match e with
       let xVal, taintness = eval exprRight env t priv_TB inTrustBlock in
       let letEnv = bind_env env x xVal taintness in
       eval letBody letEnv t priv_TB inTrustBlock
+| LetIn (x, exprRight, letBody) -> 
+    if (inTrustBlock) then failwith "You can't take a var from input in a TrustBlock"
+    else
+    let xVal, taintness = eval exprRight env true priv_TB inTrustBlock in
+    let letEnv = bind_env env x xVal taintness in
+    eval letBody letEnv true priv_TB inTrustBlock
 | Fun (f_param, fBody) ->
   (Closure (f_param, fBody, env, priv_TB), t)
 | Apply (eFun, eArg) -> ( 
   let fClosure, tClosure = eval eFun env t priv_TB inTrustBlock in
   match fClosure with
   | Closure (x, fBody, fDeclEnv, priv_TB) ->
-      (* xVal is evaluated in the current env *)
       let xVal, taintness = eval eArg env tClosure priv_TB inTrustBlock in
         let fBodyEnv = (x, xVal, taintness) :: fDeclEnv in
-          (* fBody is evaluated in the updated env *)
           eval fBody fBodyEnv taintness priv_TB inTrustBlock
   | _ -> failwith "eval Call: not a function")
-| Abort msg -> failwith msg
 | Trustblock tc ->
-    if t then failwith "Tainted sources cannot access trust block"
+    if t then failwith "The content of the TrustBlock is tainted"
     else
       eval tc env t priv_TB true
 | LetSecret (id, exprRight, letBody) ->
@@ -163,6 +184,8 @@ match e with
       failwith "Cannot create TrustBlocks inside an Include"
   | _ -> (ClosureInclude (iBody, env), t))
 | Execute e -> 
+  if inTrustBlock then failwith "You can't execute a file in a TrustBlock" 
+  else
   begin
     let v1, t1 = eval e env t priv_TB inTrustBlock in
     match v1 with
@@ -171,16 +194,12 @@ match e with
   end
 | CallHandler (e1, e2) -> (
     let v1, t1 = eval e1 env t priv_TB inTrustBlock in
-    if handle_lookup priv_TB e2 then failwith "Can't access a handle"
+    if not (handle_lookup priv_TB e2) then failwith "You can access only an handle var"
     else
       match (v1, t1) with
       | Secure_Block(priv_TB, secondEnv), t1 -> eval e2 secondEnv t1 priv_TB inTrustBlock
       | _ -> failwith "the access must be applied to an trustblock")
 | End -> (Secure_Block(priv_TB,env),t)
-
-
-
-
 
 (*----------------------------------------------------------------------------------------------------*)
 (*TEST*)
@@ -287,3 +306,23 @@ let print_eval (ris : evt * bool) =
   
     
     print_eval(prova);;   
+
+  (*TEST 6 -> let da input*)
+  let x = Let("mytrustB",Trustblock(LetIn("a",Eint 5,  End)), Prim ("*", Eint 5, Eint 6));;
+  
+  let env = [] 
+  let priv_TB = [] 
+  let prova = eval (x) env false priv_TB false
+  
+  
+  let print_eval (ris : evt * bool) =
+    (*Just to display on the terminal the evaluation result*)
+    match ris with
+    | Int u, t -> Printf.printf " Result: Int %d, Taintness: %b\n" u t
+    | Bool u, t -> Printf.printf " Result: Bool %b, Taintness: %b \n" u t
+    | String u, t -> Printf.printf " Result: String %s, Taintness: %b\n" u t
+    | Secure_Block (u,b),t ->  Printf.printf " Result: Block created succesfully\n"
+    | _ -> Printf.printf " Closure\n";;
+  
+    
+    print_eval(prova);; 
