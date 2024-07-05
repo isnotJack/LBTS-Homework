@@ -50,6 +50,13 @@ type evt =
 (*UTILITIES*)
 (*----------------------------------------------------------------------------------------------------*)
 
+(* let rec print_list priv_TB =
+  (*Just to display on the terminal the evaluation result*)
+  match priv_TB with
+  | [] -> Printf.printf " Lista vuota \n"
+  | (x,s) :: rest -> let _ = Printf.printf " Ide %s " x  in 
+                    print_list rest *)
+
 let rec lookup env x =
 match env with
 | [] -> failwith (x ^ "not found")
@@ -71,6 +78,7 @@ let rec pub_lookup priv_TB x =
   | (y, s) :: r -> if x = y && s = Public then true else pub_lookup r x
 
 let rec handle_lookup priv_TB x = 
+  (* let _ = print_list priv_TB in *)
   match priv_TB, x with
   | [], _ -> false
   | _, Var y -> (
@@ -194,12 +202,12 @@ match e with
   end
 | CallHandler (e1, e2) -> (
     let v1, t1 = eval e1 env t priv_TB inTrustBlock in
-    if not (handle_lookup priv_TB e2) then failwith "You can access only an handle var"
-    else
       match (v1, t1) with
-      | Secure_Block(priv_TB, secondEnv), t1 -> eval e2 secondEnv t1 priv_TB inTrustBlock
+      | Secure_Block(priv_TB1, secondEnv), t1 -> 
+          if not (handle_lookup priv_TB1 e2) then failwith "You can access only an handle var" else
+            eval e2 secondEnv t1 priv_TB inTrustBlock
       | _ -> failwith "the access must be applied to an trustblock")
-| End -> (Secure_Block(priv_TB,env),t)
+| End -> (*let _ = print_list priv_TB in*) (Secure_Block(priv_TB,env),t)
 
 (*----------------------------------------------------------------------------------------------------*)
 (*TEST*)
@@ -222,7 +230,7 @@ let print_eval (ris : evt * bool) =
   
   print_eval(prova);;
 
-(*TEST 2
+(*TEST 2*)
 let x = Trustblock(Let("a",Eint 5,  Let("b", Eint 5,Prim ("*", Var "b", Var "a"))));;
 
 let env = [] 
@@ -241,7 +249,7 @@ let print_eval (ris : evt * bool) =
 
   
   print_eval(prova);;
-*)
+
 (*TEST 3*)
 let x = Let("mytrustB",Trustblock(LetPublic("x",Eint 11,LetHandle("x",End))),
         Let("a",Eint 5,  Let("b", Eint 5,Prim ("*", Var "b", Var "a"))));;
