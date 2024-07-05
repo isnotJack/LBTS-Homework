@@ -37,6 +37,7 @@ type exp =
 | Include of exp
 | Execute of exp
 | CallHandler of exp * exp
+| ChangeConfLevel of ide
 | End
 
 type evt =
@@ -92,17 +93,10 @@ let lattice_checking a b = match a,b with
   | _, _ -> false;;  
 
 let join e e' = if e = Low then e' else High ;;
-
-let rec type_check_exp (e:exp) (c_env: conf_level c_env) =
-  match e with
-  | Eint i -> Low
-  | Ebool b -> Low
-  | Var x -> c_lookup c_env x
-  | _ -> failwith "type error";;
-
   
 let bind_env env (x:ide) (v:evt) (t:bool) = (x,v,t)::env
 let bind_tb priv_TB (x:ide) (sl:sec_level) = (x,sl)::priv_TB
+let bind_cf c_env (x:ide) (cf:conf_level) = (x,cf)::c_env
 
  (*let rec print_list priv_TB =
   (*Just to display on the terminal the evaluation result*)
@@ -110,6 +104,10 @@ let bind_tb priv_TB (x:ide) (sl:sec_level) = (x,sl)::priv_TB
   | [] -> Printf.printf " Lista vuota \n"
   | (x,s) :: rest -> let _ = Printf.printf " Ide %s " x  in 
                     print_list rest *)
+let rec enhanceConfLevel (x: ide) (c_env: conf_level c_env) =
+  match c_env with
+  | [] -> failwith (x ^ " not found in changeConfLevel")
+  | (y, c) :: r -> if x = y then (y, High) :: r else (y, c) :: enhanceConfLevel x r
 
 (*----------------------------------------------------------------------------------------------------*)
 (*INTERPRETER*)
@@ -229,6 +227,56 @@ match e with
           (*let _ = print_list priv_TB in*)
           (Secure_Block(priv_TB,env),t) 
           )
+| ChangeConfLevel x -> (Int 1), false;;
+
+(*----------------------------------------------------------------------------------------------------*)
+(*TYPE CHECKING*)
+(*----------------------------------------------------------------------------------------------------*)
+
+let rec type_check_exp (e:exp) (c_env: conf_level c_env)  =
+  match e with
+  | Eint i -> Low
+  | Ebool b -> Low
+  | Var x -> c_lookup c_env x
+  | Prim (op, e1, e2) ->  let t = type_check_exp e1 c_env in
+                          let t1 = type_check_exp e2 c_env in
+                          (join t t1) 
+  | ChangeConfLevel x ->  let _ = enhanceConfLevel x c_env in High  (*va messa come 2param di una let*)
+  | Include c -> Low              
+  | _ -> failwith "type error";;
+
+let rec type_check_com (c:exp) (c_env: conf_level c_env) (cxt: conf_level) : bool =
+  match c with
+  | If(e, c1, c2) ->  let t = type_check_exp e c_env in
+                      let cxt1 = (join cxt t) in
+                      (type_check_com c1 c_env cxt1) &&
+                      (type_check_com c2 c_env cxt1)
+  | Let(x, e, c) -> let t = type_check_exp e c_env in (*consideri la variabile definita x = LOW *)
+                      let cxt1 = (join cxt t) in
+                      if (lattice_checking cxt1 (Low)) then
+                        let _ = bind_cf c_env x cxt1 in
+                          type_check_com c c_env cxt1
+                      else false
+  | Fun(x, c) -> type_check_com c c_env cxt
+  | Trustblock c -> type_check_com c c_env cxt
+  | LetSecret(x, e, c) -> let t = type_check_exp e c_env in (*consideri la variabile definita x = HIGH *)
+                          let cxt1 = (join cxt t) in
+                          if (lattice_checking cxt1 (High)) then
+                            let _ = bind_cf c_env x cxt1 in
+                              type_check_com c c_env cxt1
+                          else false
+  | LetPublic(x, e, c) -> let t = type_check_exp e c_env in (*consideri la variabile definita x = HIGH *)
+                          let cxt1 = (join cxt t) in
+                          if (lattice_checking cxt1 (Low)) then
+                            let _ = bind_cf c_env x cxt1 in
+                              type_check_com c c_env cxt1
+                          else false                        
+  | LetHandle(x, c) -> if (c_lookup c_env x) = High 
+                        then 
+                            failwith "Handle must be high"
+                        else 
+                            type_check_com c c_env cxt
+  | _-> true;;
 
 (*----------------------------------------------------------------------------------------------------*)
 (*TEST*)
