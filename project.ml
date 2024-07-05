@@ -14,7 +14,8 @@ type conf_level =
 
 (* 'env' is a list of: identifier ('ide') - value ('v') - taintness ('bool')*) 
 type 'v env = (ide * 'v  * bool) list
-
+(* FALLO*) 
+type 'v c_env = (ide * conf_level) list
 (*'priv_TB' is a list of: identifier ('ide') - security level ('sec_level')*)
 type 'v priv_TB = (ide * sec_level) list
 
@@ -52,13 +53,18 @@ type evt =
 
 let rec lookup env x =
 match env with
-| [] -> failwith (x ^ "not found")
+| [] -> failwith (x ^ " not found lookup")
 | (y, v, _) :: r -> if x = y then v else lookup r x
 
 let rec t_lookup env x =
 match env with
-| [] -> failwith (x ^ "not found")
+| [] -> failwith (x ^ " not found t_lookup")
 | (y, _, t) :: r -> if x = y then t else t_lookup r x
+
+let rec c_lookup env x =
+  match env with
+  | [] -> failwith (x ^ " not found c_lookup")
+  | (y, c) :: r -> if x = y then c else c_lookup r x
 
 let rec secret_lookup priv_TB x = 
 match priv_TB with
@@ -71,6 +77,7 @@ let rec pub_lookup priv_TB x =
   | (y, s) :: r -> if x = y && s = Public then true else pub_lookup r x
 
 let rec handle_lookup priv_TB x = 
+  (* let _ = print_list priv_TB in *)
   match priv_TB, x with
   | [], _ -> false
   | _, Var y -> (
@@ -86,8 +93,23 @@ let lattice_checking a b = match a,b with
 
 let join e e' = if e = Low then e' else High ;;
 
+let rec type_check_exp (e:exp) (c_env: conf_level c_env) =
+  match e with
+  | Eint i -> Low
+  | Ebool b -> Low
+  | Var x -> c_lookup c_env x
+  | _ -> failwith "type error";;
+
+  
 let bind_env env (x:ide) (v:evt) (t:bool) = (x,v,t)::env
 let bind_tb priv_TB (x:ide) (sl:sec_level) = (x,sl)::priv_TB
+
+ (*let rec print_list priv_TB =
+  (*Just to display on the terminal the evaluation result*)
+  match priv_TB with
+  | [] -> Printf.printf " Lista vuota \n"
+  | (x,s) :: rest -> let _ = Printf.printf " Ide %s " x  in 
+                    print_list rest *)
 
 (*----------------------------------------------------------------------------------------------------*)
 (*INTERPRETER*)
@@ -150,6 +172,8 @@ match e with
           eval fBody fBodyEnv taintness priv_TB inTrustBlock
   | _ -> failwith "eval Call: not a function")
 | Trustblock tc ->
+    if inTrustBlock then failwith "You can't create a TrustBlock inside a TrustBlock"
+    else
     if t then failwith "The content of the TrustBlock is tainted"
     else
       eval tc env t priv_TB true
@@ -194,135 +218,102 @@ match e with
   end
 | CallHandler (e1, e2) -> (
     let v1, t1 = eval e1 env t priv_TB inTrustBlock in
-    if not (handle_lookup priv_TB e2) then failwith "You can access only an handle var"
-    else
       match (v1, t1) with
-      | Secure_Block(priv_TB, secondEnv), t1 -> eval e2 secondEnv t1 priv_TB inTrustBlock
+      | Secure_Block(priv_TB1, secondEnv), t1 -> 
+        if not (handle_lookup priv_TB1 e2) 
+          then failwith "You can access only an handle var" 
+        else
+          eval e2 secondEnv t1 priv_TB inTrustBlock
       | _ -> failwith "the access must be applied to an trustblock")
-| End -> (Secure_Block(priv_TB,env),t)
+| End ->  (
+          (*let _ = print_list priv_TB in*)
+          (Secure_Block(priv_TB,env),t) 
+          )
 
 (*----------------------------------------------------------------------------------------------------*)
 (*TEST*)
 (*----------------------------------------------------------------------------------------------------*)
+
+let print_eval (ris : evt * bool) =
+  (*Just to display on the terminal the evaluation result*)
+  match ris with
+  | Int u, t -> Printf.printf " Result: Int %d, Taintness: %b\n" u t
+  | Bool u, t -> Printf.printf " Result: Bool %b, Taintness: %b \n" u t
+  | String u, t -> Printf.printf " Result: String %s, Taintness: %b\n" u t
+  | _ -> Printf.printf " Closure\n";;
+
+  let run_test name test_fn =   
+    try     
+      Printf.printf "Running %s...\n" name;     
+      test_fn ();     
+      Printf.printf "%s passed.\n" name;   
+  with   
+    | Failure msg -> Printf.printf "%s failed: %s\n" name msg   
+    | exn -> Printf.printf "%s failed with unexpected exception: %s\n" name (Printexc.to_string exn)
+
 (*TEST 1*)
-let x = Let("a",Eint 5,  Let("b", Eint 5,Prim ("*", Var "b", Var "a")));;
-
-let env = [] 
-let priv_TB = [] 
-let prova = eval (x) env false priv_TB false
-
-
-let print_eval (ris : evt * bool) =
-  (*Just to display on the terminal the evaluation result*)
-  match ris with
-  | Int u, t -> Printf.printf " Result: Int %d, Taintness: %b\n" u t
-  | Bool u, t -> Printf.printf " Result: Bool %b, Taintness: %b \n" u t
-  | String u, t -> Printf.printf " Result: String %s, Taintness: %b\n" u t
-  | _ -> Printf.printf " Closure\n";;
-  
+let test_1 () = 
+  let x = Let("a",Eint 5,  Let("b", Eint 5,Prim ("*", Var "b", Var "a"))) in
+  let env = [] in
+  let priv_TB = [] in
+  let prova = eval (x) env false priv_TB false in
   print_eval(prova);;
 
-(*TEST 2
-let x = Trustblock(Let("a",Eint 5,  Let("b", Eint 5,Prim ("*", Var "b", Var "a"))));;
-
-let env = [] 
-let priv_TB = [] 
-let prova = eval (x) env false priv_TB false
-
-
-let print_eval (ris : evt * bool) =
-  (*Just to display on the terminal the evaluation result*)
-  match ris with
-  | Int u, t -> Printf.printf " Result: Int %d, Taintness: %b\n" u t
-  | Bool u, t -> Printf.printf " Result: Bool %b, Taintness: %b \n" u t
-  | String u, t -> Printf.printf " Result: String %s, Taintness: %b\n" u t
-  | Secure_Block (u,b),t ->  Printf.printf " Result: Block created succesfully\n"
-  | _ -> Printf.printf " Closure\n";;
-
-  
+(*TEST 2 *)
+let test_2 () = 
+  let x = Trustblock(Let("a",Eint 5,  Let("b", Eint 5,Prim ("*", Var "b", Var "a")))) in
+  let env = [] in
+  let priv_TB = [] in
+  let prova = eval (x) env false priv_TB false in
   print_eval(prova);;
-*)
+
 (*TEST 3*)
-let x = Let("mytrustB",Trustblock(LetPublic("x",Eint 11,LetHandle("x",End))),
-        Let("a",Eint 5,  Let("b", Eint 5,Prim ("*", Var "b", Var "a"))));;
-
-let env = [] 
-let priv_TB = [] 
-let prova = eval (x) env false priv_TB false
-
-
-let print_eval (ris : evt * bool) =
-  (*Just to display on the terminal the evaluation result*)
-  match ris with
-  | Int u, t -> Printf.printf " Result: Int %d, Taintness: %b\n" u t
-  | Bool u, t -> Printf.printf " Result: Bool %b, Taintness: %b \n" u t
-  | String u, t -> Printf.printf " Result: String %s, Taintness: %b\n" u t
-  | Secure_Block (u,b),t ->  Printf.printf " Result: Block created succesfully\n"
-  | _ -> Printf.printf " Closure\n";;
-
-  
+let test_3 () = 
+  let x = Let("mytrustB",Trustblock(LetPublic("x_1",Eint 11,LetHandle("x_1",End))),Let("a",Eint 5,  Let("b", Eint 5,Prim ("*", Var "b", Var "a")))) in
+  let env = [] in
+  let priv_TB = [] in
+  let prova = eval (x) env false priv_TB false in
   print_eval(prova);;
   
   (*TEST 4 -> prova di access trust*)
-  let x = Let("mytrustB",Trustblock(LetPublic("x",Eint 11,LetPublic("f",Var "x",LetHandle("f", End)))),
-  CallHandler(Var "mytrustB", Var "f")
-);;
-  
-  let env = [] 
-  let priv_TB = [] 
-  let prova = eval (x) env false priv_TB false
-  
-  
-  let print_eval (ris : evt * bool) =
-    (*Just to display on the terminal the evaluation result*)
-    match ris with
-    | Int u, t -> Printf.printf " Result: Int %d, Taintness: %b\n" u t
-    | Bool u, t -> Printf.printf " Result: Bool %b, Taintness: %b \n" u t
-    | String u, t -> Printf.printf " Result: String %s, Taintness: %b\n" u t
-    | Secure_Block (u,b),t ->  Printf.printf " Result: Block created succesfully\n"
-    | _ -> Printf.printf " Closure\n";;
-  
-    
+  let test_4 () =
+    let x = Let("mytrustB",Trustblock(LetPublic("x",Eint 11,LetPublic("f",Var "x",LetHandle("f", End)))),CallHandler(Var "mytrustB", Var "f"))in  
+    let env = [] in
+    let priv_TB = [] in
+    let prova = eval (x) env false priv_TB false in
     print_eval(prova);;
 
  
   (*TEST 5 -> prova di include*)
-  let x = Let("extCode",Include(Let("a",Eint 5,Let("b",Eint 2,Prim ("*", Var "b", Var "a")))),
-      Execute(Var "extCode"));;
-  
-  let env = [] 
-  let priv_TB = [] 
-  let prova = eval (x) env false priv_TB false
-  
-  
-  let print_eval (ris : evt * bool) =
-    (*Just to display on the terminal the evaluation result*)
-    match ris with
-    | Int u, t -> Printf.printf " Result: Int %d, Taintness: %b\n" u t
-    | Bool u, t -> Printf.printf " Result: Bool %b, Taintness: %b \n" u t
-    | String u, t -> Printf.printf " Result: String %s, Taintness: %b\n" u t
-    | Secure_Block (u,b),t ->  Printf.printf " Result: Block created succesfully\n"
-    | _ -> Printf.printf " Closure\n";;
-  
-    
+  let test_5 () =
+    let x = Let("extCode",Include(Let("a",Eint 5,Let("b",Eint 2,Prim ("*", Var "b", Var "a")))),Execute(Var "extCode")) in
+    let env = [] in
+    let priv_TB = [] in
+    let prova = eval (x) env false priv_TB false in
     print_eval(prova);;   
 
-  (*TEST 6 -> let da input*)
-  let x = Let("mytrustB",Trustblock(LetIn("a",Eint 5,  End)), Prim ("*", Eint 5, Eint 6));;
-  
-  let env = [] 
-  let priv_TB = [] 
-  let prova = eval (x) env false priv_TB false
-  
-  
-  let print_eval (ris : evt * bool) =
-    (*Just to display on the terminal the evaluation result*)
-    match ris with
-    | Int u, t -> Printf.printf " Result: Int %d, Taintness: %b\n" u t
-    | Bool u, t -> Printf.printf " Result: Bool %b, Taintness: %b \n" u t
-    | String u, t -> Printf.printf " Result: String %s, Taintness: %b\n" u t
-    | Secure_Block (u,b),t ->  Printf.printf " Result: Block created succesfully\n"
-    | _ -> Printf.printf " Closure\n";;
-  
-    
+  (*TEST 6 -> let da input *)
+  let test_6 () =
+    let x = Let("mytrustB",Trustblock(LetIn("a",Eint 5,  End)), Prim ("*", Eint 5, Eint 6)) in
+    let env = [] in
+    let priv_TB = [] in
+    let prova = eval (x) env false priv_TB false in
+    print_eval(prova);;   
+
+  (*TEST 7 -> capire se var funziona*)
+  let test_7 () =
+    let x = Let("mytrustB",Trustblock(LetSecret("a",Eint 5,  End)), Let("mytrustC",Trustblock(LetPublic("y",Var "a",LetHandle("y", End))),Prim ("*", Eint 5, Var "y"))) in
+    let env = [] in
+    let priv_TB = [] in
+    let prova = eval (x) env false priv_TB false in
     print_eval(prova);; 
+
+
+  let () = 
+    run_test "test 1" test_1;
+    run_test "test 2" test_2;
+    run_test "test 3" test_3;
+    run_test "test 4" test_4;
+    run_test "test 5" test_5;
+    run_test "test 6" test_6;
+    run_test "test 7" test_7;
