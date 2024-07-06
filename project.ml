@@ -98,12 +98,16 @@ let bind_env env (x:ide) (v:evt) (t:bool) = (x,v,t)::env
 let bind_tb priv_TB (x:ide) (sl:sec_level) = (x,sl)::priv_TB
 let bind_cf c_env (x:ide) (cf:conf_level) = (x,cf)::c_env
 
- (*let rec print_list priv_TB =
+let string_of_conf_level = function
+  | High -> "High"
+  | Low -> "Low"
+ let rec print_list priv_TB =
   (*Just to display on the terminal the evaluation result*)
   match priv_TB with
   | [] -> Printf.printf " Lista vuota \n"
-  | (x,s) :: rest -> let _ = Printf.printf " Ide %s " x  in 
-                    print_list rest *)
+  | (x,s) :: rest -> let _ = Printf.printf " Ide %s, Level %s" x (string_of_conf_level s) in 
+                    print_list rest 
+
 let rec enhanceConfLevel (x: ide) (c_env: conf_level c_env) =
   match c_env with
   | [] -> failwith (x ^ " not found in changeConfLevel")
@@ -242,7 +246,8 @@ let rec type_check_exp (e:exp) (c_env: conf_level c_env)  =
                           let t1 = type_check_exp e2 c_env in
                           (join t t1) 
   | ChangeConfLevel x ->  let _ = enhanceConfLevel x c_env in High  (*va messa come 2param di una let*)
-  | Include c -> Low              
+  | Include c -> Low  
+  | CallHandler (c1, c2) -> Low
   | _ -> failwith "type error";;
 
 let rec type_check_com (c:exp) (c_env: conf_level c_env) (cxt: conf_level) : bool =
@@ -251,29 +256,38 @@ let rec type_check_com (c:exp) (c_env: conf_level c_env) (cxt: conf_level) : boo
                       let cxt1 = (join cxt t) in
                       (type_check_com c1 c_env cxt1) &&
                       (type_check_com c2 c_env cxt1)
-  | Let(x, e, c) -> let t = type_check_exp e c_env in (*consideri la variabile definita x = LOW *)
+  | Let(x, e, c) -> 
+                    let t = 
+                    match e with 
+                    | Trustblock _ -> let a = type_check_com e c_env cxt in
+                                      if a = true 
+                                        then Low
+                                        else failwith "Trustblock must be well typed" 
+                    | _ -> type_check_exp e c_env 
+                    in
                       let cxt1 = (join cxt t) in
                       if (lattice_checking cxt1 (Low)) then
-                        let _ = bind_cf c_env x cxt1 in
-                          type_check_com c c_env cxt1
+                        let c_env1 = bind_cf c_env x Low in
+                          type_check_com c c_env1 cxt1
                       else false
   | Fun(x, c) -> type_check_com c c_env cxt
   | Trustblock c -> type_check_com c c_env cxt
   | LetSecret(x, e, c) -> let t = type_check_exp e c_env in (*consideri la variabile definita x = HIGH *)
                           let cxt1 = (join cxt t) in
                           if (lattice_checking cxt1 (High)) then
-                            let _ = bind_cf c_env x cxt1 in
-                              type_check_com c c_env cxt1
+                            let c_env1 = bind_cf c_env x High in
+                              type_check_com c c_env1 cxt1
                           else false
   | LetPublic(x, e, c) -> let t = type_check_exp e c_env in (*consideri la variabile definita x = HIGH *)
                           let cxt1 = (join cxt t) in
                           if (lattice_checking cxt1 (Low)) then
-                            let _ = bind_cf c_env x cxt1 in
-                              type_check_com c c_env cxt1
+                            let c_env1 = bind_cf c_env x Low in
+                              let _ = print_list c_env1 in
+                                type_check_com c c_env1 cxt1
                           else false                        
   | LetHandle(x, c) -> if (c_lookup c_env x) = High 
                         then 
-                            failwith "Handle must be high"
+                            failwith "Handle must be Low"
                         else 
                             type_check_com c c_env cxt
   | _-> true;;
@@ -290,21 +304,31 @@ let print_eval (ris : evt * bool) =
   | String u, t -> Printf.printf " Result: String %s, Taintness: %b\n" u t
   | _ -> Printf.printf " Closure\n";;
 
+
+let print_type (ris : bool) =
+  (*Just to display on the terminal the information flow result*)
+  match ris with
+  | true-> Printf.printf " Result well typed \n" 
+  | false -> Printf.printf " Illegal flow \n" ;;
+
   let run_test name test_fn =   
     try     
       Printf.printf "Running %s...\n" name;     
       test_fn ();     
       Printf.printf "%s passed.\n" name;   
-  with   
-    | Failure msg -> Printf.printf "%s failed: %s\n" name msg   
-    | exn -> Printf.printf "%s failed with unexpected exception: %s\n" name (Printexc.to_string exn)
+    with   
+      | Failure msg -> Printf.printf "%s failed: %s\n" name msg   
+      | exn -> Printf.printf "%s failed with unexpected exception: %s\n" name (Printexc.to_string exn)
 
 (*TEST 1*)
 let test_1 () = 
   let x = Let("a",Eint 5,  Let("b", Eint 5,Prim ("*", Var "b", Var "a"))) in
   let env = [] in
   let priv_TB = [] in
+  let c_env = [] in
+  let prova_2 = type_check_com x c_env Low in
   let prova = eval (x) env false priv_TB false in
+  print_type(prova_2);
   print_eval(prova);;
 
 (*TEST 2 *)
@@ -312,15 +336,21 @@ let test_2 () =
   let x = Trustblock(Let("a",Eint 5,  Let("b", Eint 5,Prim ("*", Var "b", Var "a")))) in
   let env = [] in
   let priv_TB = [] in
+  let c_env = [] in
+  let prova_2 = type_check_com x c_env Low in
   let prova = eval (x) env false priv_TB false in
+  print_type(prova_2);
   print_eval(prova);;
 
 (*TEST 3*)
 let test_3 () = 
-  let x = Let("mytrustB",Trustblock(LetPublic("x_1",Eint 11,LetHandle("x_1",End))),Let("a",Eint 5,  Let("b", Eint 5,Prim ("*", Var "b", Var "a")))) in
+  let x = Let("mytrustB",Trustblock(LetPublic("x_1",Eint 11,LetHandle("x_1",End))),Let("a",Eint 5,Let("b", Eint 5,Prim ("*", Var "b", Var "a")))) in
   let env = [] in
   let priv_TB = [] in
+  let c_env = [] in
+  let prova_2 = type_check_com x c_env Low in
   let prova = eval (x) env false priv_TB false in
+  print_type(prova_2);
   print_eval(prova);;
   
   (*TEST 4 -> prova di access trust*)
@@ -328,34 +358,50 @@ let test_3 () =
     let x = Let("mytrustB",Trustblock(LetPublic("x",Eint 11,LetPublic("f",Var "x",LetHandle("f", End)))),CallHandler(Var "mytrustB", Var "f"))in  
     let env = [] in
     let priv_TB = [] in
+    let c_env = [] in
+    let prova_2 = type_check_com x c_env Low in
     let prova = eval (x) env false priv_TB false in
+    print_type(prova_2);
     print_eval(prova);;
 
  
-  (*TEST 5 -> prova di include*)
+  (*TEST 5 -> prova di include *)
   let test_5 () =
     let x = Let("extCode",Include(Let("a",Eint 5,Let("b",Eint 2,Prim ("*", Var "b", Var "a")))),Execute(Var "extCode")) in
     let env = [] in
     let priv_TB = [] in
+    let c_env = [] in
+    let prova_2 = type_check_com x c_env Low in
     let prova = eval (x) env false priv_TB false in
-    print_eval(prova);;   
-
+    print_type(prova_2);
+    print_eval(prova);;
   (*TEST 6 -> let da input *)
   let test_6 () =
     let x = Let("mytrustB",Trustblock(LetIn("a",Eint 5,  End)), Prim ("*", Eint 5, Eint 6)) in
     let env = [] in
     let priv_TB = [] in
     let prova = eval (x) env false priv_TB false in
-    print_eval(prova);;   
-
+    print_eval(prova);;
   (*TEST 7 -> capire se var funziona*)
   let test_7 () =
     let x = Let("mytrustB",Trustblock(LetSecret("a",Eint 5,  End)), Let("mytrustC",Trustblock(LetPublic("y",Var "a",LetHandle("y", End))),Prim ("*", Eint 5, Var "y"))) in
     let env = [] in
     let priv_TB = [] in
+    let c_env = [] in
+    let prova_2 = type_check_com x c_env Low in
     let prova = eval (x) env false priv_TB false in
-    print_eval(prova);; 
-
+    print_type(prova_2);
+    print_eval(prova);;
+(*TEST 8*)
+let test_8 () = 
+  let x = Let("mytrustB",Trustblock(LetSecret("y", Eint 22, LetPublic("x_1",Var "y",LetHandle("x_1",End)))),Let("a",Eint 5,  Let("b", Eint 5,Prim ("*", Var "b", Var "a")))) in
+  let env = [] in
+  let priv_TB = [] in
+  let c_env = [] in
+  let prova_2 = type_check_com x c_env Low in
+  let prova = eval (x) env false priv_TB false in
+  print_type(prova_2);
+  print_eval(prova);;
 
   let () = 
     run_test "test 1" test_1;
@@ -365,3 +411,9 @@ let test_3 () =
     run_test "test 5" test_5;
     run_test "test 6" test_6;
     run_test "test 7" test_7;
+    run_test "test 8" test_8;;
+
+(*----------------------------------------------------------------------------------------------------*)
+
+
+
