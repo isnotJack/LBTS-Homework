@@ -37,7 +37,6 @@ type exp =
 | Include of exp
 | Execute of exp
 | CallHandler of exp * exp
-| ChangeConfLevel of ide
 | End
 
 type evt =
@@ -105,13 +104,13 @@ let string_of_conf_level = function
   (*Just to display on the terminal the evaluation result*)
   match priv_TB with
   | [] -> Printf.printf " Lista vuota \n"
-  | (x,s) :: rest -> let _ = Printf.printf " Ide %s, Level %s" x (string_of_conf_level s) in 
+  | (x,s,_) :: rest -> let _ = Printf.printf " Ide %s, " x (*(string_of_conf_level s)*) in 
                     print_list rest 
 
-let rec enhanceConfLevel (x: ide) (c_env: conf_level c_env) =
+(*let rec enhanceConfLevel (x: ide) (c_env: conf_level c_env) =
   match c_env with
   | [] -> failwith (x ^ " not found in changeConfLevel")
-  | (y, c) :: r -> if x = y then (y, High) :: r else (y, c) :: enhanceConfLevel x r
+  | (y, c) :: r -> if x = y then (y, High) :: r else (y, c) :: enhanceConfLevel x r*)
 
 (*----------------------------------------------------------------------------------------------------*)
 (*INTERPRETER*)
@@ -225,13 +224,13 @@ match e with
         if not (handle_lookup priv_TB1 e2) 
           then failwith "You can access only an handle var" 
         else
-          eval e2 secondEnv t1 priv_TB inTrustBlock
+          (*let _ = print_list secondEnv in*)
+          eval e2 secondEnv t1 priv_TB1 inTrustBlock
       | _ -> failwith "the access must be applied to an trustblock")
 | End ->  (
           (*let _ = print_list priv_TB in*)
           (Secure_Block(priv_TB,env),t) 
           )
-| ChangeConfLevel x -> (Int 1), false;;
 
 (*----------------------------------------------------------------------------------------------------*)
 (*TYPE CHECKING*)
@@ -245,7 +244,6 @@ let rec type_check_exp (e:exp) (c_env: conf_level c_env)  =
   | Prim (op, e1, e2) ->  let t = type_check_exp e1 c_env in
                           let t1 = type_check_exp e2 c_env in
                           (join t t1) 
-  | ChangeConfLevel x ->  let _ = enhanceConfLevel x c_env in High  (*va messa come 2param di una let*)
   | Include c -> Low  
   | CallHandler (c1, c2) -> Low
   | _ -> failwith "type error";;
@@ -282,7 +280,7 @@ let rec type_check_com (c:exp) (c_env: conf_level c_env) (cxt: conf_level) : boo
                           let cxt1 = (join cxt t) in
                           if (lattice_checking cxt1 (Low)) then
                             let c_env1 = bind_cf c_env x Low in
-                              let _ = print_list c_env1 in
+                              (*let _ = print_list c_env1 in*)
                                 type_check_com c c_env1 cxt1
                           else false                        
   | LetHandle(x, c) -> if (c_lookup c_env x) = High 
@@ -403,6 +401,28 @@ let test_8 () =
   print_type(prova_2);
   print_eval(prova);;
 
+(*TEST 9)*)
+let test_9 () = 
+  let x = Let("mytrustA", Trustblock(LetPublic("x", Eint 11, LetHandle("x",End))), Let("y", CallHandler(Var "mytrustA",Var "x"),Prim ("*", Eint 6, Var "y"))) in
+  let env = [] in
+  let priv_TB = [] in
+  let c_env = [] in
+  let prova_2 = type_check_com x c_env Low in
+  let prova = eval (x) env false priv_TB false in
+  print_type(prova_2);
+  print_eval(prova);;
+
+(*TEST 10)* ->prova che include non può avere valori secret*)
+let test_10 () = 
+  let x = Let("mytrustA", Trustblock(LetSecret("x", Eint 11, End)), Let("c",Include(Let("y", Var "x",Var "y")), Execute(Var "c")))in
+  let env = [] in
+  let priv_TB = [] in
+  let c_env = [] in
+  let prova_2 = type_check_com x c_env Low in
+  let prova = eval (x) env false priv_TB false in
+  print_type(prova_2);
+  print_eval(prova);;
+
   let () = 
     run_test "test 1" test_1;
     run_test "test 2" test_2;
@@ -411,7 +431,9 @@ let test_8 () =
     run_test "test 5" test_5;
     run_test "test 6" test_6;
     run_test "test 7" test_7;
-    run_test "test 8" test_8;;
+    run_test "test 8" test_8;
+    run_test "test 9" test_9;
+    run_test "test 10" test_10;;
 
 (*----------------------------------------------------------------------------------------------------*)
 
