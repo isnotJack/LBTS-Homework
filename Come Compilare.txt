@@ -1,4 +1,6 @@
 
+Il file project.ml non serve più a nulla ma l'ho lasciato per sicurezza
+
 Compilare i file singolarmente --> produce due file uno .cmi e uno .cmo
 ocamlc -c ast.ml
 ocamlc -c utilities.ml
