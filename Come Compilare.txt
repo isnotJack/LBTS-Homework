@@ -1,0 +1,15 @@
+
+Compilare i file singolarmente --> produce due file uno .cmi e uno .cmo
+ocamlc -c ast.ml
+ocamlc -c utilities.ml
+ocamlc -c eval.ml
+ocamlc -c type_checking.ml
+ocamlc -c test.ml
+
+
+
+Linkare i file compilati .cmo
+ocamlc -o project ast.cmo utilities.cmo eval.cmo type_checking.cmo test.cmo --> se si cambia l'ordine può dare problemi per la definizione dei moduli
+
+Run
+./project
