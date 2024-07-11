@@ -190,12 +190,7 @@ match e with
     eval body newEnv t priv_TB2 inTrustBlock   
 | Include content -> (
   if inTrustBlock then failwith "You can't include a file in a TrustBlock" 
-  else
-  match content with
-  | Include _ -> failwith "Cannot include within an Include"
-  | Trustblock _ ->
-      failwith "Cannot create TrustBlocks inside an Include"
-  | _ -> (ClosureInclude (content, env), t))
+  else (ClosureInclude (content, env), t))
 | Execute e -> 
   if inTrustBlock then failwith "You can't execute a file in a TrustBlock" 
   else

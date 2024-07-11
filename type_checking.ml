@@ -35,17 +35,16 @@ let rec type_check_com (c:exp) (c_env: conf_level c_env) (cxt: conf_level) : boo
                       else false
   | Fun(x, c) -> type_check_com c c_env cxt
   | Trustblock content -> type_check_com content c_env cxt
-  | LetSecret(x, value, body) -> let t = type_check_exp value c_env in (*consideri la variabile definita x = HIGH *)
+  | LetSecret(x, value, body) -> let t = type_check_exp value c_env in 
                           let cxt1 = (join cxt t) in
                           if (lattice_checking cxt1 (High)) then
                             let c_env1 = bind_cf c_env x High in
                               type_check_com body c_env1 cxt1
                           else false
-  | LetPublic(x, value, body) -> let t = type_check_exp value c_env in (*consideri la variabile definita x = HIGH *)
+  | LetPublic(x, value, body) -> let t = type_check_exp value c_env in 
                           let cxt1 = (join cxt t) in
                           if (lattice_checking cxt1 (Low)) then
                             let c_env1 = bind_cf c_env x Low in
-                              (*let _ = print_list c_env1 in*)
                                 type_check_com body c_env1 cxt1
                           else false                        
   | LetHandle(x, body) -> if (c_lookup c_env x) = High 

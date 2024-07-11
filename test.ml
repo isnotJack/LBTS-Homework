@@ -8,12 +8,6 @@ open Eval
 open Type_checking  
 
 
-(*let rec print_list priv_TB =
-(*Just to display on the terminal the evaluation result*)
-match priv_TB with
-| [] -> Printf.printf " Lista vuota \n"
-| (x,s,_) :: rest -> let _ = Printf.printf " Ide %s, " x (*(string_of_conf_level s)*) in 
-print_list rest *)
 
 let print_eval (ris : evt * bool) =
 (*Just to display on the terminal the evaluation result*)

@@ -48,6 +48,3 @@ let rec lookup env x =
   let bind_tb priv_TB (x:ide) (sl:sec_level) = (x,sl)::priv_TB
   let bind_cf c_env (x:ide) (cf:conf_level) = (x,cf)::c_env
   
-  let string_of_conf_level = function
-    | High -> "High"
-    | Low -> "Low"
