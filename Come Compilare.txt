@@ -15,3 +15,10 @@ ocamlc -o project ast.cmo utilities.cmo eval.cmo type_checking.cmo test.cmo --> 
 
 Run
 ./project
+
+
+Con il make file  basta
+    - make
+    - ./project
+
+
