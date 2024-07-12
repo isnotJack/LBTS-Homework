@@ -22,7 +22,7 @@ $(EXECUTABLE): $(OBJECTS)
 
 # Clean target to remove compiled files
 clean:
-	rm -f *.cmi *.cmo $(EXECUTABLE)
+	rm -f *.cmi *.cmo 
 
 # Phony targets
 .PHONY: all clean
