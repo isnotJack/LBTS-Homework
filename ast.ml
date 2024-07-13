@@ -16,7 +16,7 @@ type conf_level =
 type 'v env = (ide * 'v  * bool) list
 (* 'c_env' is a list of: identifier ('ide') - confidential level ('conf_level')*) 
 type 'v c_env = (ide * conf_level) list
-(*'priv_TB' is a list of: identifier ('ide') - security level ('sec_level')*)
+(*'priv_TB' is a list of: identifier ('ide') - security level ('sec_level')x*)
 type 'v priv_TB = (ide * sec_level) list
 
 type exp =

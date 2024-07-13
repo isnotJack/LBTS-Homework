@@ -21,7 +21,7 @@ match ris with
 let print_type (ris : bool) =
 (*Just to display on the terminal the information flow result*)
 match ris with
-| true-> Printf.printf " Result: Well typed \n" 
+| true -> Printf.printf " Result: Well typed \n" 
 | false -> Printf.printf " Result: Illegal flow \n" ;;
 
 let run_test name test_fn =   
@@ -117,7 +117,7 @@ let test_8 () =
   let _ = print_type(test_IF) in
   let test_eval = eval (x) env false priv_TB false in
   print_eval(test_eval);;
-(*TEST 09 -> try to verify that the plugin cannot access a secret variable*)
+(*TEST 9 -> try to verify that the plugin cannot access a secret variable*)
 let test_9 () = 
   let x = Let("mytrustA", Trustblock(LetSecret("x", Eint 11, End)), Let("c",Include(Let("y", Var "x",Var "y")), Execute(Var "c")))in
   let env = [] in
@@ -137,7 +137,7 @@ let test_10 () =
   let _ = print_type(test_IF) in
   let test_eval = eval (x) env false priv_TB false in
   print_eval(test_eval);;
-(*TEST 11 -> A Include inside a Trusblock*)
+(*TEST 11 -> An Include inside a Trusblock*)
 let test_11 () = 
   let x = Let("mytrustB",Trustblock(Include(Let("a",Eint 5,Let("b",Eint 2,Prim ("*", Var "b", Var "a"))))),Eint 6)in
   let env = [] in
@@ -164,23 +164,8 @@ let test_12 () =
     let test_eval = eval (x) env false priv_TB false in
     print_eval(test_eval);;
 
-  (*TEST 14 -> Include inside an Include*)
-  let test_14 () = 
-    let x = Let("Include",Include(Include(Let("a",Eint 5,Let("b",Eint 2,Prim ("*", Var "b", Var "a"))))),Eint 6)in
-    let env = [] in
-    let priv_TB = [] in
-    let test_eval = eval (x) env false priv_TB false in
-    print_eval(test_eval);;
-  (*TEST 15 -> Trustblock inside an Include*)
-  let test_15 () = 
-  let x = Let("mytrustB",Include(Trustblock(Let("a",Eint 5,Let("b",Eint 2,Prim ("*", Var "b", Var "a"))))),Eint 6)in
-  let env = [] in
-  let priv_TB = [] in
-  let test_eval = eval (x) env false priv_TB false in
-  print_eval(test_eval);;
-
-(*TEST 16 -> Operation between a tainted and an untainted value*)
-let test_16 () = 
+(*TEST 14 -> Operation between a tainted and an untainted value*)
+let test_14 () = 
   let x = Let("plugin", Include(Let("a", Eint 2, Let("b", Eint 4, Prim("+", Var "a", Var "b")))),Let("Executed", Execute(Var "plugin"), Let("g", Eint 5, Prim("*", Var "g", Var "Executed"))))in
   let env = [] in
   let priv_TB = [] in
@@ -190,8 +175,8 @@ let test_16 () =
   let test_eval = eval (x) env false priv_TB false in
   print_eval(test_eval);;
 
-(*TEST 17 -> CallHandler on a variable that isn't handler*)
-let test_17 () = 
+(*TEST 15 -> CallHandler on a variable that isn't handler*)
+let test_15 () = 
   let x = Let("mytrustB",Trustblock(LetPublic("x",Eint 11,LetPublic("f",Var "x",LetHandle("f", End)))),CallHandler(Var "mytrustB", Var "x")) in
   let env = [] in
   let priv_TB = [] in
@@ -201,8 +186,8 @@ let test_17 () =
   let test_eval = eval (x) env false priv_TB false in
   print_eval(test_eval);;
 
-(*TEST 18 -> try to verify if the assert works*)
-let test_18 () = 
+(*TEST 16 -> try to verify if the assert works*)
+let test_16 () = 
   let x = LetIn("a",Eint 5, Assert(Var "a"))  in
   let env = [] in
   let priv_TB = [] in
@@ -229,6 +214,4 @@ let () =
   run_test "test 13" test_13;
   run_test "test 14" test_14;
   run_test "test 15" test_15;
-  run_test "test 16" test_16;
-  run_test "test 17" test_17;
-  run_test "test 18" test_18;;
+  run_test "test 16" test_16;;
